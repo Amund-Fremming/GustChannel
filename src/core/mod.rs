@@ -1,11 +1,11 @@
-mod client;
+mod broker;
 mod error;
 mod group;
-mod hub;
 mod payload;
+mod upgrader;
 
-pub use client::*;
+pub use broker::*;
 pub use error::*;
 pub use group::*;
-pub use hub::*;
 pub use payload::*;
+pub use upgrader::*;

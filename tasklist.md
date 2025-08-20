@@ -1,12 +1,8 @@
 # Tasklist
 
-- [ ] Create router for setting to a endpoint
-- [ ] Upgrade connection, and spawn a task for this group
-- [ ] Each group has a broadcast and vec of clients
-- [ ] on disconnect fn
-- [ ] 
-- [ ] 
-- [ ] 
+- [ ] Setup Broker / group / client simple test
+- [ ] Expand to handlers
+- [ ] Expand to multiple hubs
 
 Needs
 - Pass in vec of endpoints for connections
