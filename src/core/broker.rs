@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use axum::extract::ws::WebSocket;
+use axum::extract::ws::Message;
 use once_cell::sync::Lazy;
 use tokio::sync::{Mutex, RwLock};
+use uuid::Uuid;
 
-use crate::core::Group;
+use crate::{Client, core::Group};
 
 pub static BROKER: Lazy<Mutex<Broker>> = Lazy::new(|| Mutex::new(Broker::new()));
 
@@ -13,6 +14,7 @@ pub struct Broker {
     // registry: Mutex<HashMap<String, String>>,
     groups: RwLock<HashMap<i32, Group>>,
 }
+
 impl Broker {
     pub fn new() -> Self {
         Self {
@@ -20,15 +22,32 @@ impl Broker {
         }
     }
 
-    pub async fn add_to_group(&mut self, socket: WebSocket, group_id: i32) {
-        let mut lock = self.groups.write().await;
-        if let Some(group) = lock.get_mut(&group_id) {
+    pub async fn add_to_group(&mut self, client: Client, group_id: i32) {
+        let mut groups_lock = self.groups.write().await;
+
+        if let Some(group) = groups_lock.get_mut(&group_id) {
             println!("Adding client to group");
-            group.add(socket).await;
+            group.add(client).await;
             return;
         };
 
         println!("Creating group");
-        lock.insert(group_id, Group::new(socket));
+        groups_lock.insert(group_id, Group::new(client));
+    }
+
+    pub async fn remove_from_group(&self, group_id: i32, client_id: Uuid) {
+        let mut lock = self.groups.write().await;
+        if let Some(group) = lock.get_mut(&group_id) {
+            group.remove(client_id).await;
+        };
+    }
+
+    pub async fn send_to_group(&self, group_id: i32, payload: String) {
+        let lock = self.groups.read().await;
+        let Some(group) = lock.get(&group_id) else {
+            return;
+        };
+
+        group.send_to_group(payload).await;
     }
 }

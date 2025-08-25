@@ -1,34 +1,29 @@
 use std::sync::Arc;
 
-use axum::extract::ws::{Message, WebSocket};
-use futures_util::{
-    SinkExt, StreamExt,
-    stream::{SplitSink, SplitStream},
-};
+use axum::extract::ws::{Message, Utf8Bytes};
+use futures_util::SinkExt;
 use tokio::sync::{Mutex, mpsc};
+use uuid::Uuid;
+
+use crate::{Client, core::payload};
 
 #[derive(Debug)]
 pub struct Group {
-    clients: Arc<Mutex<Vec<SplitSink<WebSocket, Message>>>>,
+    clients: Arc<Mutex<Vec<Client>>>,
     sender: mpsc::Sender<Message>,
     queue: Option<mpsc::Receiver<Message>>,
 }
 
 impl Group {
-    pub fn new(socket: WebSocket) -> Self {
-        let (writer, reader) = socket.split();
-
+    pub fn new(client: Client) -> Self {
         let (tx, rx): (mpsc::Sender<Message>, mpsc::Receiver<Message>) = mpsc::channel(16);
-        let sender_clone = tx.clone();
 
         let mut group = Self {
-            clients: Arc::new(Mutex::new(Vec::from([writer]))),
+            clients: Arc::new(Mutex::new(Vec::from([client]))),
             sender: tx,
             queue: Some(rx),
         };
         group.spawn_broadcaster();
-
-        Self::spawn_listener(sender_clone, reader);
         group
     }
 
@@ -43,6 +38,7 @@ impl Group {
 
                 for client in lock.iter_mut() {
                     client
+                        .writer
                         .send(msg.clone())
                         .await
                         .expect("Handle this please 2");
@@ -53,40 +49,26 @@ impl Group {
         });
     }
 
-    pub async fn add(&mut self, socket: WebSocket) {
-        let (writer, reader) = socket.split();
-
+    pub async fn remove(&mut self, client_id: Uuid) {
         let mut lock = self.clients.lock().await;
-        lock.push(writer);
-
-        let channel_clone = self.sender.clone();
-        Self::spawn_listener(channel_clone, reader);
+        lock.retain(|c| c.id != client_id);
     }
 
-    pub async fn send_to_group(&self, message: Message) {
-        if let Err(e) = self.sender.send(message).await {
+    pub async fn add(&mut self, client: Client) {
+        let mut lock = self.clients.lock().await;
+        lock.push(client);
+    }
+
+    pub async fn send_to_group(&self, payload: String) {
+        let sender_clone = self.sender.clone();
+
+        let message = Message::Text(Utf8Bytes::from(payload));
+        if let Err(e) = sender_clone.send(message).await {
             println!("Failed bad: {}", e);
         };
     }
 
     pub async fn send_to_group_except() {
         todo!();
-    }
-
-    // remove actuallt
-    fn spawn_listener(sender_clone: mpsc::Sender<Message>, mut reader: SplitStream<WebSocket>) {
-        tokio::task::spawn(async move {
-            while let Some(msg) = reader.next().await {
-                if let Ok(msg) = msg {
-                    // TODO - handle error
-
-                    println!("Group received message: {:?}", msg);
-                    if let Err(e) = sender_clone.send(msg).await {
-                        println!("Failed bad: {}", e);
-                    }
-                }
-            }
-            // TODO - handle error
-        });
     }
 }
