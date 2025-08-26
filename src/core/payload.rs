@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
     pub function: String,
+    pub params: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MetaFunction {
+    pub signature: String,
     pub params: Vec<Param>,
 }
 
