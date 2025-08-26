@@ -1,8 +1,11 @@
 # Tasklist
 
-- [ ] Setup Broker / group / client simple test
-- [ ] Expand to handlers
-- [ ] Expand to multiple hubs
+- [ ] Sending messages through functions
+    - Start by just setting one default function
+    - use this to send messages
+- [ ] Change to payload sending
+- [ ] Use registers to send messages
+- [ ] Spawn senders for clients so the group is not locked
 
 Needs
 - Pass in vec of endpoints for connections

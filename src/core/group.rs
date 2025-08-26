@@ -2,51 +2,72 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, Utf8Bytes};
 use futures_util::SinkExt;
-use tokio::sync::{Mutex, mpsc};
+use tokio::{
+    sync::{
+        Mutex,
+        mpsc::{self},
+    },
+    task::JoinHandle,
+};
 use uuid::Uuid;
 
-use crate::{Client, core::payload};
+use crate::Client;
+
+static BUFFER_SIZE: usize = 32;
 
 #[derive(Debug)]
 pub struct Group {
     clients: Arc<Mutex<Vec<Client>>>,
     sender: mpsc::Sender<Message>,
-    queue: Option<mpsc::Receiver<Message>>,
+    broadcast_task: Option<JoinHandle<()>>,
 }
 
 impl Group {
     pub fn new(client: Client) -> Self {
-        let (tx, rx): (mpsc::Sender<Message>, mpsc::Receiver<Message>) = mpsc::channel(16);
+        let (tx, rx) = mpsc::channel(BUFFER_SIZE);
 
         let mut group = Self {
             clients: Arc::new(Mutex::new(Vec::from([client]))),
             sender: tx,
-            queue: Some(rx),
+            broadcast_task: None,
         };
-        group.spawn_broadcaster();
+        group.spawn_broadcaster(rx);
         group
     }
 
-    fn spawn_broadcaster(&mut self) {
-        // TODO - handle error
-        let mut queue = self.queue.take().expect("Handle this please 1");
+    pub async fn empty(&self) -> bool {
+        let lock = self.clients.lock().await;
+        lock.len() == 0
+    }
+
+    pub fn close(&mut self) {
+        if let Some(task) = self.broadcast_task.take() {
+            task.abort();
+        }
+    }
+
+    fn spawn_broadcaster(&mut self, mut queue: mpsc::Receiver<Message>) {
         let clients_pointer = self.clients.clone();
 
-        tokio::spawn(async move {
-            while let Some(msg) = queue.recv().await {
+        self.broadcast_task = Some(tokio::spawn(async move {
+            while let Some(message_type) = queue.recv().await {
                 let mut lock = clients_pointer.lock().await;
+                let mut i = 0;
 
-                for client in lock.iter_mut() {
-                    client
-                        .writer
-                        .send(msg.clone())
-                        .await
-                        .expect("Handle this please 2");
+                while i < lock.len() {
+                    if let Err(_) = lock[i].writer.send(message_type.clone()).await {
+                        lock.remove(i);
+                        continue;
+                    }
+
+                    i += 1;
                 }
             }
-            // TODO - handle error
-            // Should never happen if proper error handling in the channel.send is valdating payload properly
-        });
+
+            // TODO - remove all clients
+            // Close group
+            // Delete group
+        }));
     }
 
     pub async fn remove(&mut self, client_id: Uuid) {

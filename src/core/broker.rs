@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use axum::extract::ws::Message;
 use once_cell::sync::Lazy;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
@@ -35,11 +34,20 @@ impl Broker {
         groups_lock.insert(group_id, Group::new(client));
     }
 
-    pub async fn remove_from_group(&self, group_id: i32, client_id: Uuid) {
+    pub async fn remove_from_group(&mut self, group_id: i32, client_id: Uuid) {
         let mut lock = self.groups.write().await;
-        if let Some(group) = lock.get_mut(&group_id) {
-            group.remove(client_id).await;
+
+        let Some(group) = lock.get_mut(&group_id) else {
+            return;
         };
+
+        group.remove(client_id).await;
+
+        if group.empty().await {
+            println!("Group is empty, closing down");
+            group.close();
+            lock.remove(&group_id);
+        }
     }
 
     pub async fn send_to_group(&self, group_id: i32, payload: String) {

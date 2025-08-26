@@ -1,4 +1,19 @@
-#[derive(Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
-    //
+    pub function: String,
+    pub params: Vec<Param>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Param {
+    Type(DataType),
+    Value(serde_json::Value),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum DataType {
+    Text(String),
+    Number(i32),
 }
