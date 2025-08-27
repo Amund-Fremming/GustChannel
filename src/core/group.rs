@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::extract::ws::{Message, Utf8Bytes};
+use axum::extract::ws::Message;
 use futures_util::SinkExt;
 use tokio::{
     sync::{
@@ -80,10 +80,9 @@ impl Group {
         lock.push(client);
     }
 
-    pub async fn send_to_group(&self, payload: String) {
+    pub async fn send_to_group(&self, message: Message) {
         let sender_clone = self.sender.clone();
 
-        let message = Message::Text(Utf8Bytes::from(payload));
         if let Err(e) = sender_clone.send(message).await {
             println!("Failed bad: {}", e);
         };

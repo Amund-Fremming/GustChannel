@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use axum::{
     Router,
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -7,10 +9,21 @@ use axum::{
 use futures_util::{StreamExt, stream::SplitStream};
 use uuid::Uuid;
 
-use crate::{BROKER, Client};
+use crate::{BROKER, Client, core::parser};
 
 pub fn ws_routes() -> Router {
     Router::new().route("/", get(ws_upgrader))
+}
+
+pub fn create_websocket_routes(endpoints: HashSet<String>) -> Router {
+    let mut router = Router::new();
+
+    for endpoint in endpoints {
+        let fixed_name = format!("/{}", endpoint.trim_start_matches('/'));
+        router = router.route(&fixed_name, get(ws_upgrader));
+    }
+
+    router
 }
 
 pub async fn ws_upgrader(ws: WebSocketUpgrade) -> impl IntoResponse {
@@ -26,7 +39,7 @@ pub async fn handle_socket(socket: WebSocket) {
 
     {
         let mut lock = BROKER.lock().await;
-        lock.add_to_group(client, 1).await;
+        lock.connect_to_group(client, 1).await;
     }
 
     spawn_listener(group_id, client_id, reader);
@@ -38,17 +51,24 @@ fn spawn_listener(group_id: i32, client_id: Uuid, mut reader: SplitStream<WebSoc
             let Ok(message_type) = result else { break };
 
             match message_type {
-                Message::Text(bytes) => {
-                    println!("Recieved message from client: {:?}", bytes);
-                    let payload: &str = &bytes;
-                    let lock = BROKER.lock().await;
-                    lock.send_to_group(group_id, payload.to_string()).await;
-                    drop(lock);
+                Message::Text(utf8_bytes) => {
+                    if let Ok(payload) = parser::parse_payload(utf8_bytes).await {
+                        let lock = BROKER.lock().await;
+                        lock.dispatch_function(payload).await;
+                    }
                 }
-                Message::Binary(_bytes) => todo!(),
-                _ => disconnect_client(group_id, client_id).await,
+                Message::Close(_) => {
+                    println!("Client disconnected");
+                    disconnect_client(group_id, client_id).await;
+                }
+                _ => {
+                    println!("Recieved data in wrong format");
+                    disconnect_client(group_id, client_id).await;
+                }
             }
         }
+
+        println!("Reader failed");
 
         disconnect_client(group_id, client_id).await;
     });

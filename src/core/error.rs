@@ -10,4 +10,10 @@ pub enum ChannelError {
 
     #[error("Failed to parse payload: {0}")]
     ParseError(#[from] serde_json::Error),
+
+    #[error("JSON parse error: {0}")]
+    Json(serde_json::Error),
+
+    #[error("Utf8 parse error: {0}")]
+    Utf8(std::str::Utf8Error),
 }

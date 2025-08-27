@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
+use axum::extract::ws::{Message, Utf8Bytes};
 use once_cell::sync::Lazy;
+use serde::Serialize;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
-use crate::{Client, core::Group};
+use crate::{Client, Payload, core::Group};
 
 pub static BROKER: Lazy<Mutex<Broker>> = Lazy::new(|| Mutex::new(Broker::new()));
 
@@ -21,7 +23,7 @@ impl Broker {
         }
     }
 
-    pub async fn add_to_group(&mut self, client: Client, group_id: i32) {
+    pub async fn connect_to_group(&mut self, client: Client, group_id: i32) {
         let mut groups_lock = self.groups.write().await;
 
         if let Some(group) = groups_lock.get_mut(&group_id) {
@@ -50,12 +52,25 @@ impl Broker {
         }
     }
 
-    pub async fn send_to_group(&self, group_id: i32, payload: String) {
+    // Parses binary, validates payload, calls function
+    pub async fn dispatch_function(&self, payload: Payload) {
+        println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+
+        // Just fake for now
+        self.dispatch_message(1, &"Hello!").await
+    }
+
+    // Used in functions to send data to clients after doing some
+    pub async fn dispatch_message<T: Serialize>(&self, group_id: i32, data: &T) {
+        let json =
+            serde_json::to_string(data).expect("HANDLE THIS PLEASE, maybe send a error to user?");
+        let message = Message::Text(Utf8Bytes::from(json));
+
         let lock = self.groups.read().await;
         let Some(group) = lock.get(&group_id) else {
             return;
         };
 
-        group.send_to_group(payload).await;
+        group.send_to_group(message).await;
     }
 }

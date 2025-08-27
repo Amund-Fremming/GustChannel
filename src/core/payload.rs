@@ -6,7 +6,7 @@ pub struct Payload {
     pub params: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct MetaFunction {
     pub signature: String,
     pub params: Vec<Param>,

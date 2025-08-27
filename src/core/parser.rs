@@ -1,9 +1,10 @@
-use axum::body::Bytes;
+use axum::extract::ws::Utf8Bytes;
 
 use crate::{ChannelError, MetaFunction, Payload};
 
-pub async fn parse_payload(bytes: Bytes) -> Result<Payload, ChannelError> {
-    let payload: Payload = serde_json::from_slice(&bytes)?;
+pub async fn parse_payload(bytes: Utf8Bytes) -> Result<Payload, ChannelError> {
+    let s = bytes.as_str();
+    let payload: Payload = serde_json::from_str(s)?;
     Ok(payload)
 }
 

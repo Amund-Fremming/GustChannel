@@ -1,11 +1,12 @@
 # Tasklist
 
 - [ ] Sending messages through functions
-    - Start by just setting one default function
-    - use this to send messages
-- [ ] Change to payload sending
 - [ ] Use registers to send messages
+
+- [ ] Add possibility for multiple ws hubs, with their own brokers
+
 - [ ] Spawn senders for clients so the group is not locked
+- [ ] tracing
 
 Needs
 - Pass in vec of endpoints for connections
