@@ -11,7 +11,7 @@ pub async fn parse_payload(bytes: Utf8Bytes) -> Result<Payload, ChannelError> {
 pub async fn try_execute(payload: Payload, meta_fn: MetaFunction) -> Result<(), ChannelError> {
     let param_len = meta_fn.params.len();
     if payload.params.len() != param_len {
-        return Err(ChannelError::InvalidFunction(payload.function));
+        return Err(ChannelError::InvalidFunction(payload.function_name));
     }
 
     for i in 0..param_len {
