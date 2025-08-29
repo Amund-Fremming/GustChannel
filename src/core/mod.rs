@@ -1,5 +1,6 @@
 mod broker;
 mod client;
+mod config;
 mod error;
 mod group;
 mod parser;
