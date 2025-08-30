@@ -8,8 +8,9 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    Client, Payload,
-    core::{Group, parser},
+    client::Client,
+    core::{group::Group, parser},
+    payload::Payload,
 };
 
 type GroupMap = Arc<RwLock<HashMap<i32, Group>>>;
@@ -22,14 +23,14 @@ pub struct Broker {
 }
 
 impl Broker {
-    pub fn new(name: &str) -> Self {
+    pub(crate) fn new(name: &str) -> Self {
         Self {
             groups: Arc::new(RwLock::new(HashMap::new())),
             endpoint: name.to_string(),
         }
     }
 
-    pub fn spawn_message_reader(
+    pub(crate) fn spawn_message_reader(
         &self,
         group_id: i32,
         client_id: Uuid,
@@ -73,12 +74,12 @@ impl Broker {
         });
     }
 
-    pub async fn connect_to_group(&self, group_id: i32, client: Client) {
+    pub(crate) async fn connect_to_group(&self, group_id: i32, client: Client) {
         let mut groups_lock = self.groups.write().await;
 
         if let Some(group) = groups_lock.get_mut(&group_id) {
             info!("Adding client to group: {}", group_id);
-            group.add(client).await;
+            group.add_client(client).await;
             return;
         };
 
@@ -86,14 +87,15 @@ impl Broker {
         groups_lock.insert(group_id, Group::new(client));
     }
 
-    pub async fn remove_from_group(groups: GroupMap, group_id: i32, client_id: Uuid) {
+    // Cleanup
+    async fn remove_from_group(groups: GroupMap, group_id: i32, client_id: Uuid) {
         let mut lock = groups.write().await;
 
         let Some(group) = lock.get_mut(&group_id) else {
             return;
         };
 
-        group.remove(client_id).await;
+        group.purge_client(client_id).await;
 
         if group.empty().await {
             info!("Group {} is empty, closing down", group_id);
@@ -111,9 +113,15 @@ impl Broker {
     }
 
     // Used in functions to send data to clients after doing some
-    async fn dispatch_message<T: Serialize>(groups: GroupMap, group_id: i32, data: &T) {
-        let json =
-            serde_json::to_string(data).expect("HANDLE THIS PLEASE, maybe send a error to user?");
+    pub async fn dispatch_message<T: Serialize>(groups: GroupMap, group_id: i32, data: &T) {
+        let json = match serde_json::to_string(data) {
+            Err(e) => {
+                error!("Failed to parse data: {}", e);
+                return;
+            }
+            Ok(json) => json,
+        };
+
         let message = Message::Text(Utf8Bytes::from(json));
 
         let lock = groups.read().await;
@@ -135,7 +143,7 @@ impl Broker {
         if needs_closing {
             let mut lock = groups.write().await;
             if let Some(group) = lock.get_mut(&group_id) {
-                group.close_group_on_channel_failure().await;
+                group.purge_group_and_clients().await;
             }
 
             lock.remove(&group_id);

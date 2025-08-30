@@ -1,6 +1,6 @@
 use axum::extract::ws::Utf8Bytes;
 
-use crate::{ChannelError, MetaFunction, Payload};
+use crate::{error::ChannelError, payload::MetaFunction, payload::Payload};
 
 pub async fn parse_payload(bytes: Utf8Bytes) -> Result<Payload, ChannelError> {
     let s = bytes.as_str();

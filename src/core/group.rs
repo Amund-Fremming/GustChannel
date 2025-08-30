@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use axum::extract::ws::Message;
 use tokio::{
@@ -11,13 +14,16 @@ use tokio::{
 use tracing::error;
 use uuid::Uuid;
 
-use crate::{ChannelError, Client};
+use crate::{
+    client::Client,
+    error::{ChannelError, ChannelType},
+};
 
 static BUFFER_SIZE: usize = 32;
 
 #[derive(Debug)]
 pub struct Group {
-    clients: Arc<Mutex<Vec<Client>>>,
+    clients: Arc<Mutex<HashMap<Uuid, Client>>>,
     channel_writer: mpsc::Sender<Message>,
     group_writer_task: Option<JoinHandle<()>>,
 }
@@ -27,7 +33,7 @@ impl Group {
         let (tx, rx) = mpsc::channel(BUFFER_SIZE);
 
         let mut group = Self {
-            clients: Arc::new(Mutex::new(Vec::from([client]))),
+            clients: Arc::new(Mutex::new(HashMap::from([(client.id, client)]))),
             channel_writer: tx,
             group_writer_task: None,
         };
@@ -52,33 +58,29 @@ impl Group {
         self.group_writer_task = Some(tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
                 let mut lock = clients_pointer.lock().await;
-                let mut i = 0;
 
-                while i < lock.len() {
-                    if let Err(e) = lock[i].add_to_queue(message.clone()).await {
+                let mut failed_keys = HashSet::new();
+                for (k, v) in lock.iter_mut() {
+                    if let Err(e) = v.add_to_queue(message.clone()).await {
                         error!("{}", e);
-                        lock.remove(i);
-                        continue;
+                        failed_keys.insert(k.clone());
                     }
-
-                    i += 1;
                 }
+
+                lock.retain(|k, _v| !failed_keys.contains(k));
             }
 
             // TODO - remove all clients
             // Close group
             // Delete group
+
+            error!("Group channel was closed unexpected");
         }));
     }
 
-    pub async fn remove(&mut self, client_id: Uuid) {
+    pub async fn add_client(&mut self, client: Client) {
         let mut lock = self.clients.lock().await;
-        lock.retain(|c| c.id != client_id);
-    }
-
-    pub async fn add(&mut self, client: Client) {
-        let mut lock = self.clients.lock().await;
-        lock.push(client);
+        lock.insert(client.id, client);
     }
 
     pub async fn add_to_queue(&self, message: Message) -> Result<(), ChannelError> {
@@ -86,19 +88,32 @@ impl Group {
 
         if let Err(e) = writer_clone.send(message).await {
             error!("Group channel is down, error: {}", e);
-            return Err(ChannelError::ChannelError(crate::ChannelType::Group, e));
+            return Err(ChannelError::ChannelError(ChannelType::Group, e));
         };
 
         Ok(())
     }
 
-    pub async fn close_group_on_channel_failure(&mut self) {
+    /* Cleanup */
+
+    pub async fn purge_client(&mut self, client_id: Uuid) {
+        let mut lock = self.clients.lock().await;
+        if let Some(client) = lock.get_mut(&client_id) {
+            client.purge();
+            lock.retain(|k, _v| *k != client_id);
+        }
+    }
+
+    pub async fn purge_group_and_clients(&mut self) {
+        let mut lock = self.clients.lock().await;
+        for (_k, client) in lock.iter_mut() {
+            client.purge();
+        }
+
+        lock.clear();
+
         if let Some(task) = self.group_writer_task.take() {
             task.abort();
         };
-    }
-
-    pub async fn send_to_group_except() {
-        todo!();
     }
 }

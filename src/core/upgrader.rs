@@ -13,7 +13,10 @@ use futures_util::StreamExt;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{Broker, Client, core::config};
+use crate::{
+    client::Client,
+    core::{broker::Broker, config},
+};
 
 pub fn create_websocket_routes(endpoints: HashSet<&str>) -> Router {
     config::init_tracing();

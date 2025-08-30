@@ -4,7 +4,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::error;
 use uuid::Uuid;
 
-use crate::ChannelError;
+use crate::error::{ChannelError, ChannelType};
 
 static BUFFER_SIZE: usize = 32;
 
@@ -29,11 +29,8 @@ impl Client {
 
     pub async fn add_to_queue(&mut self, message: Message) -> Result<(), ChannelError> {
         if let Err(e) = self.channel_writer.send(message).await {
-            if let Some(task) = self.client_writer_task.take() {
-                task.abort();
-            }
-
-            return Err(ChannelError::ChannelError(super::ChannelType::Client, e));
+            self.purge();
+            return Err(ChannelError::ChannelError(ChannelType::Client, e));
         }
 
         Ok(())
@@ -53,7 +50,15 @@ impl Client {
                 }
             }
 
+            // TODO - Close client
             error!("Client channel was closed unexpected");
         }));
+    }
+
+    // Cleanup
+    pub fn purge(&mut self) {
+        if let Some(task) = self.client_writer_task.take() {
+            task.abort();
+        }
     }
 }
