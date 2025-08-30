@@ -9,6 +9,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use tracing::error;
 use uuid::Uuid;
 
 use crate::Client;
@@ -84,7 +85,7 @@ impl Group {
         let sender_clone = self.sender.clone();
 
         if let Err(e) = sender_clone.send(message).await {
-            println!("Failed bad: {}", e);
+            error!("Failed to send message to broadcast channel: {}", e);
         };
     }
 

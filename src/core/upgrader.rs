@@ -24,7 +24,7 @@ pub fn create_websocket_routes(endpoints: HashSet<&str>) -> Router {
         info!("Creating route: {}", fixed_name);
         let slave: Router = Router::new()
             .route(&fixed_name, get(ws_upgrader))
-            .with_state(Arc::new(Broker::new()));
+            .with_state(Arc::new(Broker::new(&fixed_name)));
 
         master = master.merge(slave);
     }
@@ -45,6 +45,7 @@ pub async fn handle_socket(broker: Arc<Broker>, socket: WebSocket) {
     let group_id = 1;
 
     let client = Client::new(client_id, writer);
-    broker.connect_to_group(client, 1).await;
-    broker.spawn_listener(group_id, client_id, reader);
+
+    broker.connect(client).await;
+    broker.spawn_message_reader(group_id, client_id, reader);
 }

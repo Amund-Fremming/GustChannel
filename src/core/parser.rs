@@ -14,7 +14,7 @@ pub async fn try_execute(payload: Payload, meta_fn: MetaFunction) -> Result<(), 
         return Err(ChannelError::InvalidFunction(payload.function_name));
     }
 
-    for i in 0..param_len {
+    for _i in 0..param_len {
         //
     }
 
