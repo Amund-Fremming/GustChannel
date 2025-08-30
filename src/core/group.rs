@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use axum::extract::ws::Message;
-use futures_util::SinkExt;
 use tokio::{
     sync::{
         Mutex,
@@ -12,15 +11,15 @@ use tokio::{
 use tracing::error;
 use uuid::Uuid;
 
-use crate::Client;
+use crate::{ChannelError, Client};
 
 static BUFFER_SIZE: usize = 32;
 
 #[derive(Debug)]
 pub struct Group {
     clients: Arc<Mutex<Vec<Client>>>,
-    sender: mpsc::Sender<Message>,
-    broadcast_task: Option<JoinHandle<()>>,
+    channel_writer: mpsc::Sender<Message>,
+    group_writer_task: Option<JoinHandle<()>>,
 }
 
 impl Group {
@@ -29,8 +28,8 @@ impl Group {
 
         let mut group = Self {
             clients: Arc::new(Mutex::new(Vec::from([client]))),
-            sender: tx,
-            broadcast_task: None,
+            channel_writer: tx,
+            group_writer_task: None,
         };
         group.spawn_broadcaster(rx);
         group
@@ -42,21 +41,22 @@ impl Group {
     }
 
     pub fn close(&mut self) {
-        if let Some(task) = self.broadcast_task.take() {
+        if let Some(task) = self.group_writer_task.take() {
             task.abort();
         }
     }
 
-    fn spawn_broadcaster(&mut self, mut queue: mpsc::Receiver<Message>) {
+    fn spawn_broadcaster(&mut self, mut receiver: mpsc::Receiver<Message>) {
         let clients_pointer = self.clients.clone();
 
-        self.broadcast_task = Some(tokio::spawn(async move {
-            while let Some(message_type) = queue.recv().await {
+        self.group_writer_task = Some(tokio::spawn(async move {
+            while let Some(message) = receiver.recv().await {
                 let mut lock = clients_pointer.lock().await;
                 let mut i = 0;
 
                 while i < lock.len() {
-                    if let Err(_) = lock[i].writer.send(message_type.clone()).await {
+                    if let Err(e) = lock[i].add_to_queue(message.clone()).await {
+                        error!("{}", e);
                         lock.remove(i);
                         continue;
                     }
@@ -81,11 +81,20 @@ impl Group {
         lock.push(client);
     }
 
-    pub async fn send_to_group(&self, message: Message) {
-        let sender_clone = self.sender.clone();
+    pub async fn add_to_queue(&self, message: Message) -> Result<(), ChannelError> {
+        let writer_clone = self.channel_writer.clone();
 
-        if let Err(e) = sender_clone.send(message).await {
-            error!("Failed to send message to broadcast channel: {}", e);
+        if let Err(e) = writer_clone.send(message).await {
+            error!("Group channel is down, error: {}", e);
+            return Err(ChannelError::ChannelError(crate::ChannelType::Group, e));
+        };
+
+        Ok(())
+    }
+
+    pub async fn close_group_on_channel_failure(&mut self) {
+        if let Some(task) = self.group_writer_task.take() {
+            task.abort();
         };
     }
 

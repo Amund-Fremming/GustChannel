@@ -23,3 +23,23 @@ pub enum DataType {
     Text(String),
     Number(i32),
 }
+
+// TODO - delete
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TestData {
+    name: String,
+    active: bool,
+    iteration: i32,
+    ticks: Vec<bool>,
+}
+
+impl TestData {
+    pub fn new() -> Self {
+        Self {
+            name: "test-data".into(),
+            active: true,
+            iteration: 700,
+            ticks: vec![true, true, false, true],
+        }
+    }
+}

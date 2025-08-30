@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket};
 use futures_util::{StreamExt, stream::SplitStream};
 use serde::Serialize;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -17,10 +17,8 @@ type GroupMap = Arc<RwLock<HashMap<i32, Group>>>;
 #[derive(Debug)]
 pub struct Broker {
     // registry: Mutex<HashMap<String, String>>,
-    /* For debugging */
     pub endpoint: String,
     groups: GroupMap,
-    client_cache: Arc<Mutex<HashMap<Uuid, Client>>>,
 }
 
 impl Broker {
@@ -28,17 +26,7 @@ impl Broker {
         Self {
             groups: Arc::new(RwLock::new(HashMap::new())),
             endpoint: name.to_string(),
-            client_cache: Arc::new(Mutex::new(HashMap::new())),
         }
-    }
-
-    pub async fn connect(&self, client: Client) {
-        info!(
-            "Client connected to broker: {}, client_id: {}",
-            self.endpoint, client.id
-        );
-        let mut lock = self.client_cache.lock().await;
-        lock.insert(client.id, client);
     }
 
     pub fn spawn_message_reader(
@@ -57,7 +45,8 @@ impl Broker {
                     Message::Text(utf8_bytes) => match parser::parse_payload(utf8_bytes).await {
                         Ok(payload) => {
                             info!("Received a message on broker: {}", endpoint_clone);
-                            Self::dispatch_function(groups_pointer.clone(), payload).await;
+                            Self::dispatch_function(group_id, payload, groups_pointer.clone())
+                                .await;
                         }
                         Err(e) => {
                             error!("Failed to parse payload: {}", e);
@@ -84,11 +73,11 @@ impl Broker {
         });
     }
 
-    pub async fn connect_to_group(&self, client: Client, group_id: i32) {
+    pub async fn connect_to_group(&self, group_id: i32, client: Client) {
         let mut groups_lock = self.groups.write().await;
 
         if let Some(group) = groups_lock.get_mut(&group_id) {
-            info!("Adding client to group");
+            info!("Adding client to group: {}", group_id);
             group.add(client).await;
             return;
         };
@@ -114,10 +103,11 @@ impl Broker {
     }
 
     // Parses json, validates payload, calls function
-    async fn dispatch_function(groups: GroupMap, payload: Payload) {
+    async fn dispatch_function(group_id: i32, payload: Payload, groups: GroupMap) {
         debug!("Dispatching function: {}", payload.function_name);
+
         // Just fake for now
-        Self::dispatch_message(groups, 1, &"Hello!").await
+        Self::dispatch_message(groups, group_id, &"Hello!").await
     }
 
     // Used in functions to send data to clients after doing some
@@ -128,9 +118,27 @@ impl Broker {
 
         let lock = groups.read().await;
         let Some(group) = lock.get(&group_id) else {
+            warn!("Client tried to send to non existing group: {}", group_id);
             return;
         };
 
-        group.send_to_group(message).await;
+        let needs_closing = match group.add_to_queue(message).await {
+            Ok(_) => false,
+            Err(e) => {
+                error!("{}", e);
+                true
+            }
+        };
+
+        drop(lock);
+
+        if needs_closing {
+            let mut lock = groups.write().await;
+            if let Some(group) = lock.get_mut(&group_id) {
+                group.close_group_on_channel_failure().await;
+            }
+
+            lock.remove(&group_id);
+        }
     }
 }
