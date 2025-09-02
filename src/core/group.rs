@@ -25,7 +25,7 @@ static BUFFER_SIZE: usize = 32;
 pub struct Group {
     clients: Arc<Mutex<HashMap<Uuid, Client>>>,
     channel_writer: mpsc::Sender<Message>,
-    group_writer_task: Option<JoinHandle<()>>,
+    group_writer_task: Option<JoinHandle<bool>>,
 }
 
 impl Group {
@@ -46,12 +46,6 @@ impl Group {
         lock.len() == 0
     }
 
-    pub fn close(&mut self) {
-        if let Some(task) = self.group_writer_task.take() {
-            task.abort();
-        }
-    }
-
     fn spawn_broadcaster(&mut self, mut receiver: mpsc::Receiver<Message>) {
         let clients_pointer = self.clients.clone();
 
@@ -70,11 +64,8 @@ impl Group {
                 lock.retain(|k, _v| !failed_keys.contains(k));
             }
 
-            // TODO - remove all clients
-            // Close group
-            // Delete group
-
             error!("Group channel was closed unexpected");
+            return false;
         }));
     }
 

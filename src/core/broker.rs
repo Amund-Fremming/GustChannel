@@ -99,7 +99,7 @@ impl Broker {
 
         if group.empty().await {
             info!("Group {} is empty, closing down", group_id);
-            group.close();
+            group.purge_group_and_clients().await;
             lock.remove(&group_id);
         }
     }
