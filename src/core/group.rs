@@ -26,7 +26,7 @@ static BUFFER_SIZE: usize = 32;
 
 #[derive(Debug)]
 pub struct Group {
-    clients: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Client>>>>>,
+    clients: Arc<Mutex<HashMap<Uuid, Client>>>,
     channel_writer: mpsc::Sender<Arc<Message>>,
     group_writer_task: Option<JoinHandle<()>>,
     active_flag: Arc<AtomicBool>,
@@ -37,10 +37,7 @@ impl Group {
         let (tx, rx) = mpsc::channel(BUFFER_SIZE);
 
         let mut group = Self {
-            clients: Arc::new(Mutex::new(HashMap::from([(
-                client.id,
-                Arc::new(Mutex::new(client)),
-            )]))),
+            clients: Arc::new(Mutex::new(HashMap::from([(client.id, client)]))),
             channel_writer: tx,
             group_writer_task: None,
             active_flag: Arc::new(AtomicBool::new(true)),
@@ -60,30 +57,21 @@ impl Group {
 
         self.group_writer_task = Some(tokio::task::spawn(async move {
             while let Some(message) = receiver.recv().await {
-                let mut clients: Vec<(Uuid, Arc<Mutex<Client>>)> = Vec::new();
+                let mut failed_keys = HashSet::new();
 
                 {
-                    let lock = clients_pointer.lock().await;
-                    for (u, c) in lock.iter() {
-                        clients.push((u.clone(), c.clone()));
+                    let mut lock = clients_pointer.lock().await;
+                    for (id, client) in lock.iter_mut() {
+                        if let Err(e) = client.add_to_queue(message.clone()).await {
+                            error!("Failed to add message to client queue: {}", e);
+                            failed_keys.insert(id);
+                        }
                     }
-                }
-
-                let mut failed_keys = HashSet::new();
-                for (id, client) in clients {
-                    let mut lock = client.lock().await;
-
-                    if let Err(e) = lock.add_to_queue(message.clone()).await {
-                        error!("{}", e);
-                        lock.purge();
-                        failed_keys.insert(id);
-                    };
-                    drop(lock);
                 }
 
                 if !failed_keys.is_empty() {
                     let mut lock = clients_pointer.lock().await;
-                    lock.retain(|id, _client| !failed_keys.contains(id));
+                    lock.retain(|id, _client| !failed_keys.contains(&id));
                 }
             }
 
@@ -102,7 +90,7 @@ impl Group {
     pub async fn add_client(&mut self, client: Client) -> Result<(), WsError> {
         self.ensure_active().await?;
         let mut lock = self.clients.lock().await;
-        lock.insert(client.id, Arc::new(Mutex::new(client)));
+        lock.insert(client.id, client);
         Ok(())
     }
 
@@ -124,23 +112,16 @@ impl Group {
         let mut clients_lock = self.clients.lock().await;
 
         if let Some(client) = clients_lock.get_mut(&client_id) {
-            let mut lock = client.lock().await;
-            lock.purge();
-            drop(lock);
-        } else {
-            return;
+            client.purge();
+            clients_lock.retain(|k, _v| *k != client_id);
         }
-
-        clients_lock.retain(|k, _v| *k != client_id);
     }
 
     pub async fn purge_group_and_clients(&mut self) {
         let mut clients_lock = self.clients.lock().await;
 
         for (_id, client) in clients_lock.iter_mut() {
-            let mut lock = client.lock().await;
-            lock.purge();
-            drop(lock);
+            client.purge();
         }
 
         clients_lock.clear();
