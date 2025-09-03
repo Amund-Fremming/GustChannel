@@ -5,9 +5,8 @@ use std::sync::{
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, stream::SplitSink};
-use serde::de;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::{debug, error};
+use tracing::error;
 use uuid::Uuid;
 
 use crate::error::{ChannelType, WsError};
