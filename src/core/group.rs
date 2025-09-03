@@ -59,18 +59,15 @@ impl Group {
             while let Some(message) = receiver.recv().await {
                 let mut failed_keys = HashSet::new();
 
-                {
-                    let mut lock = clients_pointer.lock().await;
-                    for (id, client) in lock.iter_mut() {
-                        if let Err(e) = client.add_to_queue(message.clone()).await {
-                            error!("Failed to add message to client queue: {}", e);
-                            failed_keys.insert(id);
-                        }
+                let mut lock = clients_pointer.lock().await;
+                for (id, client) in lock.iter_mut() {
+                    if let Err(e) = client.add_to_queue(message.clone()).await {
+                        error!("Failed to add message to client queue: {}", e);
+                        failed_keys.insert(*id);
                     }
                 }
 
                 if !failed_keys.is_empty() {
-                    let mut lock = clients_pointer.lock().await;
                     lock.retain(|id, _client| !failed_keys.contains(&id));
                 }
             }

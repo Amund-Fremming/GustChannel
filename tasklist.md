@@ -16,4 +16,3 @@
 Registry solution 1
 - Store functions as functions with a vec as params
 - Create regisyter functions for adding funcitons with param length 1-5 or something
-- Let these functions serialize the params, and create a new funciton of the registered function with vec as param
