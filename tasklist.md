@@ -1,13 +1,5 @@
 # Tasklist
 
-# Left off
-
-- tried to implement a claenup for failing task in client and group
-- Use a flag with rwlcok and arc
-
-- [ ] Purge functionality to client task
-- [ ] Purge functionality to group task
-- [ ] Way of removing group when it fails from broker
 - [ ] Add registry
 - [ ] Take in functions from library user
 - [ ] Call functions from frontend
