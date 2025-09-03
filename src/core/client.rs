@@ -5,8 +5,9 @@ use std::sync::{
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, stream::SplitSink};
+use serde::de;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::error;
+use tracing::{debug, error};
 use uuid::Uuid;
 
 use crate::error::{ChannelType, WsError};
@@ -16,7 +17,7 @@ static BUFFER_SIZE: usize = 32;
 #[derive(Debug)]
 pub struct Client {
     pub id: Uuid,
-    channel_writer: mpsc::Sender<Message>,
+    channel_writer: mpsc::Sender<Arc<Message>>,
     client_writer_task: Option<JoinHandle<()>>,
     active_flag: Arc<AtomicBool>,
 }
@@ -34,8 +35,8 @@ impl Client {
         client
     }
 
-    pub async fn add_to_queue(&mut self, message: Message) -> Result<(), WsError> {
-        if self.active_flag.load(Ordering::SeqCst) {
+    pub async fn add_to_queue(&mut self, message: Arc<Message>) -> Result<(), WsError> {
+        if !self.active_flag.load(Ordering::SeqCst) {
             return Err(WsError::ChannelClosed(ChannelType::Client));
         }
 
@@ -48,7 +49,7 @@ impl Client {
 
     fn spawn_client_writer(
         &mut self,
-        mut receiver: mpsc::Receiver<Message>,
+        mut receiver: mpsc::Receiver<Arc<Message>>,
         mut writer: SplitSink<WebSocket, Message>,
     ) {
         let id_clone = self.id.clone();
@@ -56,7 +57,7 @@ impl Client {
 
         self.client_writer_task = Some(tokio::task::spawn(async move {
             while let Some(message) = receiver.recv().await {
-                if let Err(e) = writer.send(message).await {
+                if let Err(e) = writer.send((*message).clone()).await {
                     error!("Error writing to client: {}, client_id: {}", e, id_clone);
                 }
             }

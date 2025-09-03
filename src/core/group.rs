@@ -26,8 +26,8 @@ static BUFFER_SIZE: usize = 32;
 
 #[derive(Debug)]
 pub struct Group {
-    clients: Arc<Mutex<HashMap<Uuid, Client>>>,
-    channel_writer: mpsc::Sender<Message>,
+    clients: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Client>>>>>,
+    channel_writer: mpsc::Sender<Arc<Message>>,
     group_writer_task: Option<JoinHandle<()>>,
     active_flag: Arc<AtomicBool>,
 }
@@ -37,7 +37,10 @@ impl Group {
         let (tx, rx) = mpsc::channel(BUFFER_SIZE);
 
         let mut group = Self {
-            clients: Arc::new(Mutex::new(HashMap::from([(client.id, client)]))),
+            clients: Arc::new(Mutex::new(HashMap::from([(
+                client.id,
+                Arc::new(Mutex::new(client)),
+            )]))),
             channel_writer: tx,
             group_writer_task: None,
             active_flag: Arc::new(AtomicBool::new(true)),
@@ -51,24 +54,37 @@ impl Group {
         lock.len() == 0
     }
 
-    fn spawn_broadcaster(&mut self, mut receiver: mpsc::Receiver<Message>) {
+    fn spawn_broadcaster(&mut self, mut receiver: mpsc::Receiver<Arc<Message>>) {
         let clients_pointer = self.clients.clone();
         let flag_pointer = self.active_flag.clone();
 
-        self.group_writer_task = Some(tokio::spawn(async move {
+        self.group_writer_task = Some(tokio::task::spawn(async move {
             while let Some(message) = receiver.recv().await {
-                let mut lock = clients_pointer.lock().await;
+                let mut clients: Vec<(Uuid, Arc<Mutex<Client>>)> = Vec::new();
 
-                let mut failed_keys = HashSet::new();
-                for (k, v) in lock.iter_mut() {
-                    if let Err(e) = v.add_to_queue(message.clone()).await {
-                        error!("{}", e);
-                        v.purge();
-                        failed_keys.insert(k.clone());
+                {
+                    let lock = clients_pointer.lock().await;
+                    for (u, c) in lock.iter() {
+                        clients.push((u.clone(), c.clone()));
                     }
                 }
 
-                lock.retain(|k, _v| !failed_keys.contains(k));
+                let mut failed_keys = HashSet::new();
+                for (id, client) in clients {
+                    let mut lock = client.lock().await;
+
+                    if let Err(e) = lock.add_to_queue(message.clone()).await {
+                        error!("{}", e);
+                        lock.purge();
+                        failed_keys.insert(id);
+                    };
+                    drop(lock);
+                }
+
+                if !failed_keys.is_empty() {
+                    let mut lock = clients_pointer.lock().await;
+                    lock.retain(|id, _client| !failed_keys.contains(id));
+                }
             }
 
             error!("Group channel was closed unexpected");
@@ -86,11 +102,11 @@ impl Group {
     pub async fn add_client(&mut self, client: Client) -> Result<(), WsError> {
         self.ensure_active().await?;
         let mut lock = self.clients.lock().await;
-        lock.insert(client.id, client);
+        lock.insert(client.id, Arc::new(Mutex::new(client)));
         Ok(())
     }
 
-    pub async fn add_to_queue(&self, message: Message) -> Result<(), WsError> {
+    pub async fn add_to_queue(&self, message: Arc<Message>) -> Result<(), WsError> {
         self.ensure_active().await?;
         let writer_clone = self.channel_writer.clone();
 
@@ -105,20 +121,29 @@ impl Group {
     /* Cleanup */
 
     pub async fn purge_client(&mut self, client_id: Uuid) {
-        let mut lock = self.clients.lock().await;
-        if let Some(client) = lock.get_mut(&client_id) {
-            client.purge();
-            lock.retain(|k, _v| *k != client_id);
+        let mut clients_lock = self.clients.lock().await;
+
+        if let Some(client) = clients_lock.get_mut(&client_id) {
+            let mut lock = client.lock().await;
+            lock.purge();
+            drop(lock);
+        } else {
+            return;
         }
+
+        clients_lock.retain(|k, _v| *k != client_id);
     }
 
     pub async fn purge_group_and_clients(&mut self) {
-        let mut lock = self.clients.lock().await;
-        for (_k, client) in lock.iter_mut() {
-            client.purge();
+        let mut clients_lock = self.clients.lock().await;
+
+        for (_id, client) in clients_lock.iter_mut() {
+            let mut lock = client.lock().await;
+            lock.purge();
+            drop(lock);
         }
 
-        lock.clear();
+        clients_lock.clear();
 
         if let Some(task) = self.group_writer_task.take() {
             task.abort();

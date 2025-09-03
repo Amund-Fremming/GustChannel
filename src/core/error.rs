@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::extract::ws::Message;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -20,9 +22,9 @@ pub enum WsError {
     Utf8(std::str::Utf8Error),
 
     #[error("Channel error: {0} - {1}")]
-    ChannelError(ChannelType, SendError<Message>),
+    ChannelError(ChannelType, SendError<Arc<Message>>),
 
-    #[error("Channel closed unexpected")]
+    #[error("Channel closed unexpected: {0}")]
     ChannelClosed(ChannelType),
 }
 

@@ -111,9 +111,9 @@ impl Broker {
             Ok(json) => json,
         };
 
-        let message = Message::Text(Utf8Bytes::from(json));
-
+        let message = Arc::new(Message::Text(Utf8Bytes::from(json)));
         let lock = groups.read().await;
+
         let Some(group) = lock.get(&group_id) else {
             warn!("Client tried to send to non existing group: {}", group_id);
             return;
@@ -122,7 +122,7 @@ impl Broker {
         let needs_closing = match group.add_to_queue(message).await {
             Ok(_) => false,
             Err(e) => {
-                error!("{}", e);
+                error!("Failed to add message to group queue: {}", e);
                 true
             }
         };
@@ -130,6 +130,7 @@ impl Broker {
         drop(lock);
 
         if needs_closing {
+            warn!("Purging group and clients");
             let mut lock = groups.write().await;
             if let Some(group) = lock.get_mut(&group_id) {
                 group.purge_group_and_clients().await;
