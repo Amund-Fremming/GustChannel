@@ -1,6 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use axum::extract::ws::Message;
@@ -16,7 +19,7 @@ use uuid::Uuid;
 
 use crate::{
     client::Client,
-    error::{ChannelError, ChannelType},
+    error::{ChannelType, WsError},
 };
 
 static BUFFER_SIZE: usize = 32;
@@ -25,7 +28,8 @@ static BUFFER_SIZE: usize = 32;
 pub struct Group {
     clients: Arc<Mutex<HashMap<Uuid, Client>>>,
     channel_writer: mpsc::Sender<Message>,
-    group_writer_task: Option<JoinHandle<bool>>,
+    group_writer_task: Option<JoinHandle<()>>,
+    active_flag: Arc<AtomicBool>,
 }
 
 impl Group {
@@ -36,6 +40,7 @@ impl Group {
             clients: Arc::new(Mutex::new(HashMap::from([(client.id, client)]))),
             channel_writer: tx,
             group_writer_task: None,
+            active_flag: Arc::new(AtomicBool::new(true)),
         };
         group.spawn_broadcaster(rx);
         group
@@ -48,6 +53,7 @@ impl Group {
 
     fn spawn_broadcaster(&mut self, mut receiver: mpsc::Receiver<Message>) {
         let clients_pointer = self.clients.clone();
+        let flag_pointer = self.active_flag.clone();
 
         self.group_writer_task = Some(tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
@@ -57,6 +63,7 @@ impl Group {
                 for (k, v) in lock.iter_mut() {
                     if let Err(e) = v.add_to_queue(message.clone()).await {
                         error!("{}", e);
+                        v.purge();
                         failed_keys.insert(k.clone());
                     }
                 }
@@ -65,21 +72,31 @@ impl Group {
             }
 
             error!("Group channel was closed unexpected");
-            return false;
+            flag_pointer.store(false, Ordering::SeqCst);
         }));
     }
 
-    pub async fn add_client(&mut self, client: Client) {
-        let mut lock = self.clients.lock().await;
-        lock.insert(client.id, client);
+    async fn ensure_active(&self) -> Result<(), WsError> {
+        match self.active_flag.load(Ordering::SeqCst) {
+            true => Ok(()),
+            false => Err(WsError::ChannelClosed(ChannelType::Group)),
+        }
     }
 
-    pub async fn add_to_queue(&self, message: Message) -> Result<(), ChannelError> {
+    pub async fn add_client(&mut self, client: Client) -> Result<(), WsError> {
+        self.ensure_active().await?;
+        let mut lock = self.clients.lock().await;
+        lock.insert(client.id, client);
+        Ok(())
+    }
+
+    pub async fn add_to_queue(&self, message: Message) -> Result<(), WsError> {
+        self.ensure_active().await?;
         let writer_clone = self.channel_writer.clone();
 
         if let Err(e) = writer_clone.send(message).await {
             error!("Group channel is down, error: {}", e);
-            return Err(ChannelError::ChannelError(ChannelType::Group, e));
+            return Err(WsError::ChannelError(ChannelType::Group, e));
         };
 
         Ok(())

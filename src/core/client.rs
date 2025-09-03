@@ -1,10 +1,15 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, stream::SplitSink};
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::error;
 use uuid::Uuid;
 
-use crate::error::{ChannelError, ChannelType};
+use crate::error::{ChannelType, WsError};
 
 static BUFFER_SIZE: usize = 32;
 
@@ -13,6 +18,7 @@ pub struct Client {
     pub id: Uuid,
     channel_writer: mpsc::Sender<Message>,
     client_writer_task: Option<JoinHandle<()>>,
+    active_flag: Arc<AtomicBool>,
 }
 
 impl Client {
@@ -22,15 +28,19 @@ impl Client {
             id,
             channel_writer: tx,
             client_writer_task: None,
+            active_flag: Arc::new(AtomicBool::new(true)),
         };
         client.spawn_client_writer(rx, writer);
         client
     }
 
-    pub async fn add_to_queue(&mut self, message: Message) -> Result<(), ChannelError> {
+    pub async fn add_to_queue(&mut self, message: Message) -> Result<(), WsError> {
+        if self.active_flag.load(Ordering::SeqCst) {
+            return Err(WsError::ChannelClosed(ChannelType::Client));
+        }
+
         if let Err(e) = self.channel_writer.send(message).await {
-            self.purge();
-            return Err(ChannelError::ChannelError(ChannelType::Client, e));
+            return Err(WsError::ChannelError(ChannelType::Client, e));
         }
 
         Ok(())
@@ -42,6 +52,7 @@ impl Client {
         mut writer: SplitSink<WebSocket, Message>,
     ) {
         let id_clone = self.id.clone();
+        let active_pointer = self.active_flag.clone();
 
         self.client_writer_task = Some(tokio::task::spawn(async move {
             while let Some(message) = receiver.recv().await {
@@ -50,13 +61,13 @@ impl Client {
                 }
             }
 
-            // TODO - Close client
             error!("Client channel was closed unexpected");
+            active_pointer.store(false, Ordering::SeqCst);
         }));
     }
 
     // Cleanup
-    pub fn purge(&mut self) {
+    pub(crate) fn purge(&mut self) {
         if let Some(task) = self.client_writer_task.take() {
             task.abort();
         }

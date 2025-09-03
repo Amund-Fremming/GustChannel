@@ -3,7 +3,7 @@ use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
 #[derive(Debug, Error)]
-pub enum ChannelError {
+pub enum WsError {
     #[error("Internal error {0}")]
     Internal(String),
 
@@ -21,6 +21,9 @@ pub enum ChannelError {
 
     #[error("Channel error: {0} - {1}")]
     ChannelError(ChannelType, SendError<Message>),
+
+    #[error("Channel closed unexpected")]
+    ChannelClosed(ChannelType),
 }
 
 #[derive(Debug)]

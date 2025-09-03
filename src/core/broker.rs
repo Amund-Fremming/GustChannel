@@ -77,30 +77,19 @@ impl Broker {
     pub(crate) async fn connect_to_group(&self, group_id: i32, client: Client) {
         let mut groups_lock = self.groups.write().await;
 
-        if let Some(group) = groups_lock.get_mut(&group_id) {
-            info!("Adding client to group: {}", group_id);
-            group.add_client(client).await;
-            return;
+        let group = match groups_lock.get_mut(&group_id) {
+            Some(group) => group,
+            None => {
+                info!("Creating group: {}", group_id);
+                groups_lock.insert(group_id, Group::new(client));
+                return;
+            }
         };
 
-        info!("Creating group: {}", group_id);
-        groups_lock.insert(group_id, Group::new(client));
-    }
-
-    // Cleanup
-    async fn remove_from_group(groups: GroupMap, group_id: i32, client_id: Uuid) {
-        let mut lock = groups.write().await;
-
-        let Some(group) = lock.get_mut(&group_id) else {
-            return;
-        };
-
-        group.purge_client(client_id).await;
-
-        if group.empty().await {
-            info!("Group {} is empty, closing down", group_id);
+        info!("Adding client to group: {}", group_id);
+        if let Err(e) = group.add_client(client).await {
+            error!("{}", e);
             group.purge_group_and_clients().await;
-            lock.remove(&group_id);
         }
     }
 
@@ -146,6 +135,23 @@ impl Broker {
                 group.purge_group_and_clients().await;
             }
 
+            lock.remove(&group_id);
+        }
+    }
+
+    // Cleanup
+    async fn remove_from_group(groups: GroupMap, group_id: i32, client_id: Uuid) {
+        let mut lock = groups.write().await;
+
+        let Some(group) = lock.get_mut(&group_id) else {
+            return;
+        };
+
+        group.purge_client(client_id).await;
+
+        if group.empty().await {
+            info!("Group {} is empty, closing down", group_id);
+            group.purge_group_and_clients().await;
             lock.remove(&group_id);
         }
     }

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     Router,
@@ -18,7 +18,10 @@ use crate::{
     core::{broker::Broker, config},
 };
 
-pub fn create_websocket_routes(endpoints: HashSet<&str>) -> Router {
+pub fn create_websocket_routes<I>(endpoints: I) -> Router
+where
+    I: IntoIterator<Item = String>,
+{
     config::init_tracing();
     let mut master = Router::new();
 
