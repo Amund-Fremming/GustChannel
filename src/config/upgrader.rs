@@ -13,16 +13,13 @@ use futures_util::StreamExt;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{
-    client::Client,
-    core::{broker::Broker, config},
-};
+use crate::{broker::Broker, client::Client, config::setup};
 
 pub fn create_websocket_routes<I>(endpoints: I) -> Router
 where
     I: IntoIterator<Item = String>,
 {
-    config::init_tracing();
+    setup::init_tracing();
     let mut master = Router::new();
 
     for endpoint in endpoints {
