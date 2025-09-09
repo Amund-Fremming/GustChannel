@@ -11,23 +11,33 @@ use crate::{
     client::Client,
     core::{group::Group, parser},
     payload::Payload,
+    registry::{Primitive, Registry},
 };
 
 type GroupMap = Arc<RwLock<HashMap<i32, Group>>>;
 
-#[derive(Debug)]
-pub struct Broker {
+pub struct Hub {
     // registry: Mutex<HashMap<String, String>>,
-    pub endpoint: String,
+    pub name: String,
     groups: GroupMap,
+    registry: Registry,
 }
 
-impl Broker {
-    pub(crate) fn new(name: &str) -> Self {
+impl Hub {
+    pub fn new(name: &str) -> Self {
         Self {
             groups: Arc::new(RwLock::new(HashMap::new())),
-            endpoint: name.to_string(),
+            name: name.to_string(),
+            registry: Registry::new(),
         }
+    }
+
+    pub fn add_fn<F, Fut>(&mut self, name: &str, function: F)
+    where
+        F: Fn(Vec<Primitive>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.registry.register(name, function);
     }
 
     pub(crate) fn spawn_message_reader(
@@ -36,7 +46,7 @@ impl Broker {
         client_id: Uuid,
         mut reader: SplitStream<WebSocket>,
     ) {
-        let endpoint_clone = self.endpoint.clone();
+        let endpoint_clone = self.name.clone();
         let groups_pointer = self.groups.clone();
         tokio::task::spawn(async move {
             while let Some(result) = reader.next().await {

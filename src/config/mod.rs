@@ -1,4 +1,5 @@
 pub mod models;
+pub mod registry;
 pub(crate) mod setup;
 
 pub mod error;

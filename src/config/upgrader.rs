@@ -13,21 +13,22 @@ use futures_util::StreamExt;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{broker::Broker, client::Client, config::setup};
+use crate::{broker::Hub, client::Client, config::setup};
 
-pub fn create_websocket_routes<I>(endpoints: I) -> Router
+pub fn create_hubs<I>(hubs: I) -> Router
 where
-    I: IntoIterator<Item = String>,
+    I: IntoIterator<Item = Hub>,
 {
     setup::init_tracing();
     let mut master = Router::new();
 
-    for endpoint in endpoints {
-        let fixed_name = format!("/{}/{}", endpoint.trim_start_matches('/'), "{group_id}");
-        info!("Creating broker: {}", endpoint.trim_start_matches('/'));
+    for hub in hubs {
+        let fixed_name = format!("/{}/{}", hub.name.trim_start_matches('/'), "{group_id}");
+        info!("Creating broker: {}", hub.name);
+
         let slave: Router = Router::new()
             .route(&fixed_name, get(ws_upgrader))
-            .with_state(Arc::new(Broker::new(&fixed_name)));
+            .with_state(Arc::new(hub));
 
         master = master.merge(slave);
     }
@@ -36,14 +37,14 @@ where
 }
 
 pub async fn ws_upgrader(
-    State(broker): State<Arc<Broker>>,
+    State(broker): State<Arc<Hub>>,
     Path(group_id): Path<i32>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(group_id, broker.clone(), socket))
 }
 
-pub async fn handle_socket(group_id: i32, broker: Arc<Broker>, socket: WebSocket) {
+pub async fn handle_socket(group_id: i32, broker: Arc<Hub>, socket: WebSocket) {
     let (writer, reader) = socket.split();
     let client_id = Uuid::new_v4();
 
