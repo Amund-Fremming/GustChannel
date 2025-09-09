@@ -1,4 +1,4 @@
-pub(crate) mod models;
+pub mod models;
 pub(crate) mod setup;
 
 pub mod error;
