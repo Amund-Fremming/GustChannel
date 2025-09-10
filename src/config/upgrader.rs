@@ -13,11 +13,11 @@ use futures_util::StreamExt;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{broker::Hub, client::Client, config::setup};
+use crate::{client::Client, config::setup, hub::Hub};
 
 pub fn create_hubs<I>(hubs: I) -> Router
 where
-    I: IntoIterator<Item = Hub>,
+    I: IntoIterator<Item = Arc<Hub>>,
 {
     setup::init_tracing();
     let mut master = Router::new();
@@ -28,7 +28,7 @@ where
 
         let slave: Router = Router::new()
             .route(&fixed_name, get(ws_upgrader))
-            .with_state(Arc::new(hub));
+            .with_state(hub);
 
         master = master.merge(slave);
     }

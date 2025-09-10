@@ -24,7 +24,7 @@ impl Registry {
         }
     }
 
-    pub fn register<F, Fut>(&mut self, name: &str, function: F)
+    pub fn add_fn<F, Fut>(&mut self, name: &str, function: F)
     where
         F: Fn(Vec<Primitive>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,

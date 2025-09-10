@@ -1,5 +1,4 @@
-pub mod broker;
 pub(crate) mod client;
 pub(crate) mod group;
-pub(crate) mod parser;
+pub mod hub;
 pub(crate) mod payload;

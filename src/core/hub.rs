@@ -9,18 +9,17 @@ use uuid::Uuid;
 
 use crate::{
     client::Client,
-    core::{group::Group, parser},
-    payload::Payload,
+    core::group::Group,
+    payload::{Payload, parse_payload},
     registry::{Primitive, Registry},
 };
 
 type GroupMap = Arc<RwLock<HashMap<i32, Group>>>;
 
 pub struct Hub {
-    // registry: Mutex<HashMap<String, String>>,
     pub name: String,
     groups: GroupMap,
-    registry: Registry,
+    registry: Arc<RwLock<Registry>>,
 }
 
 impl Hub {
@@ -28,16 +27,13 @@ impl Hub {
         Self {
             groups: Arc::new(RwLock::new(HashMap::new())),
             name: name.to_string(),
-            registry: Registry::new(),
+            registry: Arc::new(RwLock::new(Registry::new())),
         }
     }
 
-    pub fn add_fn<F, Fut>(&mut self, name: &str, function: F)
-    where
-        F: Fn(Vec<Primitive>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
-    {
-        self.registry.register(name, function);
+    pub async fn add_registry(&self, registry: Registry) {
+        let mut reg = self.registry.write().await;
+        *reg = registry;
     }
 
     pub(crate) fn spawn_message_reader(
@@ -48,15 +44,17 @@ impl Hub {
     ) {
         let endpoint_clone = self.name.clone();
         let groups_pointer = self.groups.clone();
+        let registry_pointer = self.registry.clone();
+
         tokio::task::spawn(async move {
             while let Some(result) = reader.next().await {
                 let Ok(message_type) = result else { break };
 
                 match message_type {
-                    Message::Text(utf8_bytes) => match parser::parse_payload(utf8_bytes).await {
+                    Message::Text(utf8_bytes) => match parse_payload(utf8_bytes).await {
                         Ok(payload) => {
                             info!("Received a message on broker: {}", endpoint_clone);
-                            Self::dispatch_function(group_id, payload, groups_pointer.clone())
+                            Self::dispatch_function(group_id, payload, registry_pointer.clone())
                                 .await;
                         }
                         Err(e) => {
@@ -104,15 +102,28 @@ impl Hub {
     }
 
     // Parses json, validates payload, calls function
-    async fn dispatch_function(group_id: i32, payload: Payload, groups: GroupMap) {
-        debug!("Dispatching function: {}", payload.function_name);
+    async fn dispatch_function(group_id: i32, payload: Payload, registry: Arc<RwLock<Registry>>) {
+        debug!(
+            "Dispatching function: {}, to group: {}",
+            payload.function_name, group_id
+        );
 
-        // Just fake for now
-        Self::dispatch_message(groups, group_id, &"Hello!").await
+        // Optimalization
+        // - Get function
+        // - Spawn task
+        // - Release lock
+        // - Call
+
+        let reg = registry.read().await;
+        reg.call(
+            &payload.function_name,
+            vec![Primitive::Text("param".into())],
+        )
+        .await;
     }
 
     // Used in functions to send data to clients after doing some
-    pub async fn dispatch_message<T: Serialize>(groups: GroupMap, group_id: i32, data: &T) {
+    pub async fn dispatch_message<T: Serialize>(&self, group_id: i32, data: &T) {
         let json = match serde_json::to_string(data) {
             Err(e) => {
                 error!("Failed to parse data: {}", e);
@@ -122,7 +133,7 @@ impl Hub {
         };
 
         let message = Arc::new(Message::Text(Utf8Bytes::from(json)));
-        let lock = groups.read().await;
+        let lock = self.groups.read().await;
 
         let Some(group) = lock.get(&group_id) else {
             warn!("Client tried to send to non existing group: {}", group_id);
@@ -141,7 +152,7 @@ impl Hub {
 
         if needs_closing {
             warn!("Purging group and clients");
-            let mut lock = groups.write().await;
+            let mut lock = self.groups.write().await;
             if let Some(group) = lock.get_mut(&group_id) {
                 group.purge_group_and_clients().await;
             }
