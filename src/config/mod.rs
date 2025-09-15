@@ -1,4 +1,3 @@
-pub mod models;
 pub mod registry;
 pub(crate) mod setup;
 

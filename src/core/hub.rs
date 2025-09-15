@@ -27,7 +27,7 @@ pub struct Hub {
 }
 
 impl Hub {
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: &str) -> Arc<Self> {
         let (tx, rx) = mpsc::channel(BUFFER_SIZE);
         let hub = Self {
             groups: Arc::new(RwLock::new(HashMap::new())),
@@ -36,10 +36,10 @@ impl Hub {
             channel_writer: tx,
         };
         hub.spawn_channel_reader(rx);
-        hub
+        Arc::new(hub)
     }
 
-    pub async fn add_registry(&self, registry: Registry) {
+    pub async fn set_registry(&self, registry: Registry) {
         let mut reg = self.registry.write().await;
         *reg = registry;
     }
