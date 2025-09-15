@@ -42,7 +42,7 @@ impl Group {
             group_writer_task: None,
             active_flag: Arc::new(AtomicBool::new(true)),
         };
-        group.spawn_broadcaster(rx);
+        group.spawn_channel_broadcaster(rx);
         group
     }
 
@@ -51,7 +51,7 @@ impl Group {
         lock.len() == 0
     }
 
-    fn spawn_broadcaster(&mut self, mut receiver: mpsc::Receiver<Arc<Message>>) {
+    fn spawn_channel_broadcaster(&mut self, mut receiver: mpsc::Receiver<Arc<Message>>) {
         let clients_pointer = self.clients.clone();
         let flag_pointer = self.active_flag.clone();
 
@@ -61,7 +61,7 @@ impl Group {
 
                 let mut lock = clients_pointer.lock().await;
                 for (id, client) in lock.iter_mut() {
-                    if let Err(e) = client.add_to_queue(message.clone()).await {
+                    if let Err(e) = client.write_to_channel(message.clone()).await {
                         error!("Failed to add message to client queue: {}", e);
                         failed_keys.insert(*id);
                     }
@@ -91,7 +91,7 @@ impl Group {
         Ok(())
     }
 
-    pub async fn add_to_queue(&self, message: Arc<Message>) -> Result<(), WsError> {
+    pub async fn write_to_channel(&self, message: Arc<Message>) -> Result<(), WsError> {
         self.ensure_active().await?;
         let writer_clone = self.channel_writer.clone();
 

@@ -22,7 +22,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(id: Uuid, writer: SplitSink<WebSocket, Message>) -> Self {
+    pub fn new(id: Uuid, ws_writer: SplitSink<WebSocket, Message>) -> Self {
         let (tx, rx) = mpsc::channel(BUFFER_SIZE);
         let mut client = Self {
             id,
@@ -30,11 +30,11 @@ impl Client {
             client_writer_task: None,
             active_flag: Arc::new(AtomicBool::new(true)),
         };
-        client.spawn_client_writer(rx, writer);
+        client.spawn_client_writer(rx, ws_writer);
         client
     }
 
-    pub async fn add_to_queue(&mut self, message: Arc<Message>) -> Result<(), WsError> {
+    pub async fn write_to_channel(&mut self, message: Arc<Message>) -> Result<(), WsError> {
         if !self.active_flag.load(Ordering::SeqCst) {
             return Err(WsError::ChannelClosed(ChannelType::Client));
         }
@@ -48,15 +48,15 @@ impl Client {
 
     fn spawn_client_writer(
         &mut self,
-        mut receiver: mpsc::Receiver<Arc<Message>>,
-        mut writer: SplitSink<WebSocket, Message>,
+        mut channel_receiver: mpsc::Receiver<Arc<Message>>,
+        mut ws_writer: SplitSink<WebSocket, Message>,
     ) {
         let id_clone = self.id.clone();
         let active_pointer = self.active_flag.clone();
 
         self.client_writer_task = Some(tokio::task::spawn(async move {
-            while let Some(message) = receiver.recv().await {
-                if let Err(e) = writer.send((*message).clone()).await {
+            while let Some(message) = channel_receiver.recv().await {
+                if let Err(e) = ws_writer.send((*message).clone()).await {
                     error!("Error writing to client: {}, client_id: {}", e, id_clone);
                 }
             }

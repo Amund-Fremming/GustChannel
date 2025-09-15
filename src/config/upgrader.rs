@@ -37,18 +37,18 @@ where
 }
 
 pub async fn ws_upgrader(
-    State(broker): State<Arc<Hub>>,
+    State(hub): State<Arc<Hub>>,
     Path(group_id): Path<i32>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(group_id, broker.clone(), socket))
+    ws.on_upgrade(move |socket| handle_socket(group_id, hub.clone(), socket))
 }
 
-pub async fn handle_socket(group_id: i32, broker: Arc<Hub>, socket: WebSocket) {
+pub async fn handle_socket(group_id: i32, hub: Arc<Hub>, socket: WebSocket) {
     let (writer, reader) = socket.split();
     let client_id = Uuid::new_v4();
 
     let client = Client::new(client_id, writer);
-    broker.connect_to_group(group_id, client).await;
-    broker.spawn_message_reader(group_id, client_id, reader);
+    hub.connect_to_group(group_id, client).await;
+    hub.spawn_message_reader(group_id, client_id, reader);
 }
