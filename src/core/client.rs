@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::error::{ChannelType, WsError};
 
-static BUFFER_SIZE: usize = 32;
+static BUFFER_SIZE: usize = 128;
 
 #[derive(Debug)]
 pub struct Client {

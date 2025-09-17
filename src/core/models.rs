@@ -29,17 +29,17 @@ impl TryFrom<Value> for Primitive {
     }
 }
 
-pub fn convert(values: Vec<Value>) -> Result<Vec<Primitive>, String> {
+pub(crate) fn convert(values: Vec<Value>) -> Result<Vec<Primitive>, String> {
     values.into_iter().map(Primitive::try_from).collect()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FnRequest {
+pub(crate) struct FnRequest {
     pub function_name: String,
     pub params: Vec<serde_json::Value>,
 }
 
-pub struct Envelope {
+pub(crate) struct Envelope {
     pub group_id: i32,
     pub json: String,
 }

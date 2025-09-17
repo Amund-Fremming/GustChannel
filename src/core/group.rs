@@ -14,7 +14,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -22,7 +22,7 @@ use crate::{
     error::{ChannelType, WsError},
 };
 
-static BUFFER_SIZE: usize = 32;
+static BUFFER_SIZE: usize = 128;
 
 #[derive(Debug)]
 pub struct Group {
@@ -95,12 +95,17 @@ impl Group {
         self.ensure_active().await?;
         let writer_clone = self.channel_writer.clone();
 
-        if let Err(e) = writer_clone.send(message).await {
-            error!("Group channel is down, error: {}", e);
-            return Err(WsError::ChannelError(ChannelType::Group, e));
-        };
-
-        Ok(())
+        match writer_clone.try_send(message) {
+            Ok(_) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                warn!("Group channel full, dropping message");
+                Ok(()) // Drop silently or handle as needed
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                error!("Group channel closed");
+                Err(WsError::ChannelClosed(ChannelType::Group))
+            }
+        }
     }
 
     /* Cleanup */
