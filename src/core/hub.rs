@@ -10,9 +10,9 @@ use uuid::Uuid;
 use crate::{
     client::Client,
     core::group::Group,
-    models::Envelope,
+    models::{Envelope, convert},
     payload::{Payload, parse_payload},
-    registry::{Primitive, Registry},
+    registry::Registry,
 };
 
 static BUFFER_SIZE: usize = 128;
@@ -45,11 +45,17 @@ impl Hub {
     }
 
     pub async fn write_to_channel<T: Serialize>(&self, group_id: i32, data: T) {
-        let json = serde_json::to_string(&data).unwrap(); // HANDLE ERROR
+        let Ok(json) = serde_json::to_string(&data) else {
+            error!("Failed to parse incomming data");
+            return;
+        };
         let envelope = Envelope { group_id, json };
 
-        if let Err(error) = self.channel_writer.send(envelope).await {
-            // handle error
+        if let Err(e) = self.channel_writer.send(envelope).await {
+            error!("Failed to write to hub channel: {}", e);
+            for group in self.groups.write().await.values_mut() {
+                group.purge_group_and_clients().await;
+            }
         }
     }
 
@@ -62,7 +68,11 @@ impl Hub {
                 Self::dispatch_channel_message(groups_clone, envelope).await;
             }
 
-            // Handle error
+            error!("Hub channel has stopped working, closing hub down");
+            let mut lock = groups_pointer.write().await;
+            for group in lock.values_mut() {
+                group.purge_group_and_clients().await;
+            }
         });
     }
 
@@ -79,7 +89,6 @@ impl Hub {
         let needs_closing = match group.write_to_channel(message).await {
             Ok(_) => false,
             Err(e) => {
-                // Close down group
                 error!("Failed to add message to group queue: {}", e);
                 true
             }
@@ -170,18 +179,24 @@ impl Hub {
             payload.function_name, group_id
         );
 
-        // Optimalization
-        // - Get function
-        // - Spawn task
-        // - Release lock
-        // - Call
+        let option = {
+            let lock = registry.read().await;
+            lock.get_fn(&payload.function_name).await.cloned()
+        };
 
-        let reg = registry.read().await;
-        reg.call(
-            &payload.function_name,
-            vec![Primitive::Text("param".into())],
-        )
-        .await;
+        let Some(handler) = option else {
+            warn!("No handler found for function: {}", payload.function_name);
+            return;
+        };
+
+        let Ok(params) = convert(payload.params) else {
+            warn!("Invalid params for function: {}", payload.function_name);
+            return;
+        };
+
+        tokio::task::spawn(async move {
+            handler(params).await;
+        });
     }
 
     // Cleanup

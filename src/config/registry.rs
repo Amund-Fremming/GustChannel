@@ -3,15 +3,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::models::Primitive;
+
 pub type Func =
     Arc<dyn Fn(Vec<Primitive>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
-
-#[derive(Debug)]
-pub enum Primitive {
-    Text(String),
-    Number(i32),
-    Bool(bool),
-}
 
 pub struct Registry {
     registry: HashMap<String, Func>,
@@ -37,9 +32,11 @@ impl Registry {
         self.registry.insert(name, boxed);
     }
 
-    pub async fn call(&self, name: &str, args: Vec<Primitive>) {
+    pub async fn get_fn(&self, name: &str) -> Option<&Func> {
         if let Some(handler) = self.registry.get(name) {
-            handler(args).await;
+            return Some(handler);
         }
+
+        None
     }
 }
